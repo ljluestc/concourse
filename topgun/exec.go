@@ -9,13 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega/gexec"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 func Start(env []string, command string, argv ...string) *gexec.Session {
+	if command == "bosh" {
+		ensureBoshAvailable()
+	}
+
 	TimestampedBy("running: " + command + " " + strings.Join(argv, " "))
 
 	cmd := exec.Command(command, argv...)
@@ -31,6 +33,10 @@ func Start(env []string, command string, argv ...string) *gexec.Session {
 }
 
 func SpawnInteractive(stdin io.Reader, env []string, command string, argv ...string) *gexec.Session {
+	if command == "bosh" {
+		ensureBoshAvailable()
+	}
+
 	TimestampedBy("interactively running: " + command + " " + strings.Join(argv, " "))
 
 	cmd := exec.Command(command, argv...)
@@ -55,7 +61,17 @@ func Wait(session *gexec.Session) {
 }
 
 func Run(env []string, command string, argv ...string) *gexec.Session {
+	if command == "bosh" {
+		ensureBoshAvailable()
+	}
+
 	session := Start(env, command, argv...)
 	Wait(session)
 	return session
+}
+
+func ensureBoshAvailable() {
+	if _, err := exec.LookPath("bosh"); err != nil {
+		ginkgo.Fail("bosh CLI not found in $PATH. Please install bosh and ensure it is available in your environment.")
+	}
 }

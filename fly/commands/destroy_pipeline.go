@@ -3,29 +3,19 @@ package commands
 import (
 	"fmt"
 
-	"github.com/concourse/concourse/fly/commands/internal/flaghelpers"
+	"github.com/concourse/concourse/atc"
+	"github.com/concourse/concourse/fly/commands/internal/displayhelpers"
 	"github.com/concourse/concourse/fly/rc"
-	"github.com/concourse/concourse/go-concourse/concourse"
-	"github.com/vito/go-interact/interact"
+	"github.com/fatih/color"
 )
 
 type DestroyPipelineCommand struct {
-	Pipeline        flaghelpers.PipelineFlag `short:"p"  long:"pipeline" required:"true" description:"Pipeline to destroy"`
-	SkipInteractive bool                     `short:"n"  long:"non-interactive"          description:"Destroy the pipeline without confirmation"`
-	Team            flaghelpers.TeamFlag     `long:"team" description:"Name of the team to which the pipeline belongs, if different from the target default"`
-}
-
-func (command *DestroyPipelineCommand) Validate() error {
-	_, err := command.Pipeline.Validate()
-	return err
+	Pipeline        string `short:"p" long:"pipeline" required:"true" description:"Pipeline to destroy"`
+	Team            string `short:"n" long:"team" description:"Name of the team that owns the pipeline"`
+	SkipInteractive bool   `short:"n" long:"non-interactive" description:"Destroy the pipeline without confirmation"`
 }
 
 func (command *DestroyPipelineCommand) Execute(args []string) error {
-	err := command.Validate()
-	if err != nil {
-		return err
-
-	}
 	target, err := rc.LoadTarget(Fly.Target, Fly.Verbose)
 	if err != nil {
 		return err
@@ -36,33 +26,59 @@ func (command *DestroyPipelineCommand) Execute(args []string) error {
 		return err
 	}
 
-	var team concourse.Team
-	team, err = command.Team.LoadTeam(target)
-	if err != nil {
-		return err
-	}
-
-	pipelineRef := command.Pipeline.Ref()
-	fmt.Printf("!!! this will remove all data for pipeline `%s`\n\n", pipelineRef.String())
-
-	confirm := command.SkipInteractive
-	if !confirm {
-		err := interact.NewInteraction("are you sure?").Resolve(&confirm)
-		if err != nil || !confirm {
-			fmt.Println("bailing out")
+	var team = target.Team()
+	if command.Team != "" {
+		team, err = target.FindTeam(command.Team)
+		if err != nil {
 			return err
 		}
 	}
 
-	found, err := team.DeletePipeline(pipelineRef)
+	pipelineName := command.Pipeline
+	teamName := command.Team
+
+	// Check if the pipeline exists before prompting
+	pipelines, err := target.Team(teamName).ListPipelines()
 	if err != nil {
 		return err
 	}
 
-	if !found {
-		fmt.Printf("`%s` does not exist\n", pipelineRef.String())
+	pipelineExists := false
+	for _, pipeline := range pipelines {
+		if pipeline.Name == pipelineName {
+			pipelineExists = true
+			break
+		}
+	}
+
+	if !pipelineExists {
+		fmt.Printf("`%s` does not exist\n", pipelineName)
+		return nil
+	}
+
+	if !command.SkipInteractive {
+		displayhelpers.WarningSection("!!! this will remove all data for pipeline `" + pipelineName + "`")
+		confirm := false
+		err = displayhelpers.ConfirmInteractive(&confirm, "are you sure?")
+		if err != nil {
+			return err
+		}
+
+		if !confirm {
+			displayhelpers.Failf("bailing out")
+			return nil
+		}
+	}
+
+	found, err := target.Team(teamName).DeletePipeline(pipelineName)
+	if err != nil {
+		return err
+	}
+
+	if found {
+		fmt.Println(color.GreenString("`%s` deleted", pipelineName))
 	} else {
-		fmt.Printf("`%s` deleted\n", pipelineRef.String())
+		fmt.Println(color.RedString("`%s` does not exist", pipelineName))
 	}
 
 	return nil
